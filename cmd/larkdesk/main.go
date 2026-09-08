@@ -35,6 +35,7 @@ Reuse the already-logged-in local Lark.app / 飞书 desktop session.
   larkdesk contacts
   larkdesk search <query>
   larkdesk send <to> <text...> [--dry-run]
+  larkdesk send <to> --image <path> [--dry-run]
   larkdesk listen [--from <name-or-id>] [--exec <cmd>]
 `, version)
 }
@@ -118,22 +119,39 @@ func run(args []string) int {
 		return 0
 	case "send":
 		dry := false
+		imagePath := ""
 		rest := []string{}
-		for _, a := range args[1:] {
-			if a == "--dry-run" {
+		for i := 1; i < len(args); i++ {
+			a := args[i]
+			switch a {
+			case "--dry-run":
 				dry = true
-				continue
+			case "--image":
+				i++
+				if i >= len(args) {
+					return die(fmt.Errorf("--image needs a path"))
+				}
+				imagePath = args[i]
+			default:
+				rest = append(rest, a)
 			}
-			rest = append(rest, a)
 		}
-		if len(rest) < 2 {
-			return die(fmt.Errorf("send needs a person and text"))
+		if len(rest) < 1 {
+			return die(fmt.Errorf("send needs a person"))
 		}
 		auth, err := session.Load("", nil)
 		if err != nil {
 			return die(err)
 		}
-		out, err := send.Text(auth, rest[0], strings.Join(rest[1:], " "), dry)
+		var out map[string]any
+		if imagePath != "" {
+			out, err = send.Image(auth, rest[0], imagePath, dry)
+		} else {
+			if len(rest) < 2 {
+				return die(fmt.Errorf("send needs a person and text"))
+			}
+			out, err = send.Text(auth, rest[0], strings.Join(rest[1:], " "), dry)
+		}
 		if err != nil {
 			return die(err)
 		}

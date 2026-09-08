@@ -1,0 +1,2 @@
+[console_scripts]
+larkdesk = larkdesk.cli:main
