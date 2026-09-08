@@ -6,27 +6,22 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-if ! command -v python3 >/dev/null; then
-  echo "python3 >= 3.10 required" >&2
+if ! command -v go >/dev/null; then
+  echo "Go 1.24+ required: https://go.dev/dl/" >&2
   exit 1
 fi
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-if command -v pipx >/dev/null; then
-  pipx install --force "$ROOT"
-elif command -v uv >/dev/null; then
-  uv tool install --force "$ROOT"
-else
-  python3 -m pip install --user --upgrade pip
-  python3 -m pip install --user --force-reinstall "$ROOT"
-fi
+BIN="${HOME}/.local/bin"
+mkdir -p "$BIN"
+go build -ldflags="-s -w" -o "$BIN/larkdesk" ./cmd/larkdesk
 
 if ! command -v larkdesk >/dev/null; then
   echo "installed, but larkdesk is not on PATH. add ~/.local/bin:" >&2
   echo '  export PATH="$HOME/.local/bin:$PATH"' >&2
 fi
 
-echo "ok: $(command -v larkdesk || echo ~/.local/bin/larkdesk)"
+echo "ok: $(command -v larkdesk || echo "$BIN/larkdesk")"
 echo "open 飞书 and log in, then: larkdesk whoami"

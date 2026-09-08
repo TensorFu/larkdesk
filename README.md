@@ -2,31 +2,20 @@
 
 macOS CLI that reuses the already-logged-in **Lark.app / 飞书** desktop session. No OAuth, no `lark-cli`.
 
-Requires: macOS, Python 3.10+, 飞书已登录。
+Single static binary. Requires: macOS, 飞书已登录。
 
 ## Install
 
-```bash
-pipx install larkdesk
-```
-
-or:
+From a clone (needs Go 1.24+):
 
 ```bash
-uv tool install larkdesk
-```
-
-or:
-
-```bash
-pip install larkdesk
-```
-
-From a clone:
-
-```bash
-chmod +x install.sh
 ./install.sh
+```
+
+or:
+
+```bash
+go install github.com/TensorFu/larkdesk/cmd/larkdesk@latest
 ```
 
 Missing desktop login is a non-zero error.
