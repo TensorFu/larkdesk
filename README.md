@@ -25,17 +25,5 @@ or:
 uv tool install git+https://github.com/TensorFu/larkdesk.git
 ```
 
-## Commands
-
-```bash
-larkdesk whoami
-larkdesk contacts
-larkdesk search 钟林
-larkdesk send 钟林 hello --dry-run
-larkdesk send 钟林 hello
-```
-
-`send` only needs a person (name or id) and text. The CLI searches, get-or-creates the P2P chat, then sends.
-
 Missing desktop login is a non-zero error.
 
