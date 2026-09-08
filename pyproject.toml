@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,13 +8,23 @@ version = "0.1.0"
 description = "CLI that reuses the local Lark/Feishu desktop login"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "tensor" }]
 keywords = ["lark", "feishu", "cli"]
-dependencies = ["pycryptodome>=3.19"]
+classifiers = [
+    "Environment :: MacOS X",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Communications :: Chat",
+]
+dependencies = ["pycryptodome>=3.19", "websockets>=11"]
 
 [project.urls]
 Homepage = "https://github.com/TensorFu/larkdesk"
+Repository = "https://github.com/TensorFu/larkdesk"
+Issues = "https://github.com/TensorFu/larkdesk/issues"
 
 [project.scripts]
 larkdesk = "larkdesk.cli:main"

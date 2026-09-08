@@ -9,6 +9,7 @@ from typing import Sequence
 
 from larkdesk import __version__
 from larkdesk.contacts import ContactsError, list_contacts
+from larkdesk.listen import ListenError, run_listen
 from larkdesk.search import SearchError, search_contacts
 from larkdesk.send import SendError, send_text
 from larkdesk.session import SessionError, load_session
@@ -94,6 +95,17 @@ def cmd_send(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_listen(args: argparse.Namespace) -> int:
+    try:
+        run_listen(from_who=args.from_who, exec_cmd=args.exec_cmd)
+    except KeyboardInterrupt:
+        return 0
+    except (SessionError, SearchError, SendError, ListenError) as exc:
+        print(f"larkdesk: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="larkdesk",
@@ -116,6 +128,10 @@ def build_parser() -> argparse.ArgumentParser:
     sendp.add_argument("text", nargs="+", help="message text")
     sendp.add_argument("--dry-run", action="store_true", help="resolve chat only, do not send")
     sendp.set_defaults(func=cmd_send)
+    listenp = sub.add_parser("listen", help="stream inbound text messages as JSONL")
+    listenp.add_argument("--from", dest="from_who", default="", help="only this person (name or id)")
+    listenp.add_argument("--exec", dest="exec_cmd", default="", help="run command with each event JSON on stdin")
+    listenp.set_defaults(func=cmd_listen)
     return parser
 
 
