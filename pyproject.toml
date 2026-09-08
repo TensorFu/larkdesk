@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "larkdesk"
+version = "0.1.0"
+description = "CLI that reuses the local Lark/Feishu desktop login"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "tensor" }]
+keywords = ["lark", "feishu", "cli"]
+dependencies = ["pycryptodome>=3.19"]
+
+[project.urls]
+Homepage = "https://github.com/TensorFu/larkdesk"
+
+[project.scripts]
+larkdesk = "larkdesk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
