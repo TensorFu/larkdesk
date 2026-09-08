@@ -2,11 +2,14 @@ package send
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
-	_ "image/jpeg"
+	"image/jpeg"
 	_ "image/png"
 	"io"
 	"mime"
@@ -18,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TensorFu/larkdesk/internal/frontier"
 	"github.com/TensorFu/larkdesk/internal/gateway"
 	"github.com/TensorFu/larkdesk/internal/httpx"
 	"github.com/TensorFu/larkdesk/internal/pb"
@@ -30,6 +34,11 @@ const (
 	uploadURL        = "https://internal-api-lark-file.feishu.cn/uni_api/upload/file"
 	uploadFileType   = 2
 	uploadMountPoint = "im_file"
+	cryptoAES256GCM  = 1
+	cropOrigin       = 1
+	cropMiddle       = 2
+	cropThumb        = 3
+	defaultFSUnit    = "eu_nc-cdn"
 )
 
 func mimeForPath(path string) string {
@@ -52,10 +61,52 @@ func mimeForPath(path string) string {
 	return "image/png"
 }
 
+func cropAttr(kind, w, h int) []byte {
+	a := pb.EncodeInt(1, uint64(w))
+	a = append(a, pb.EncodeInt(2, uint64(h))...)
+	item := pb.EncodeInt(1, uint64(kind))
+	return append(item, pb.EncodeBytes(2, a)...)
+}
+
+func jpegPreview(img image.Image) []byte {
+	var buf bytes.Buffer
+	_ = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 40})
+	return buf.Bytes()
+}
+
+func EncodeImageContent(key, fsUnit string, w, h, originSize int, secret, nonce, preview []byte) []byte {
+	if fsUnit == "" {
+		fsUnit = defaultFSUnit
+	}
+	cipherMsg := pb.EncodeBytes(1, secret)
+	cipherMsg = append(cipherMsg, pb.EncodeBytes(2, nonce)...)
+	cipherMsg = append(cipherMsg, pb.EncodeBytes(3, nil)...)
+	crypto := pb.EncodeInt(1, cryptoAES256GCM)
+	crypto = append(crypto, pb.EncodeBytes(2, cipherMsg)...)
+	v2 := pb.EncodeString(1, key)
+	v2 = append(v2, pb.EncodeString(2, fsUnit)...)
+	v2 = append(v2, pb.EncodeBytes(3, crypto)...)
+	v2 = append(v2, pb.EncodeBytes(4, cropAttr(cropOrigin, w, h))...)
+	v2 = append(v2, pb.EncodeBytes(4, cropAttr(cropMiddle, w, h))...)
+	v2 = append(v2, pb.EncodeBytes(4, cropAttr(cropThumb, w, h))...)
+	if len(preview) > 0 {
+		v2 = append(v2, pb.EncodeBytes(5, preview)...)
+	}
+	out := pb.EncodeBytes(2, v2)
+	out = append(out, pb.EncodeInt(3, 1)...)
+	out = append(out, pb.EncodeInt(4, uint64(originSize))...)
+	return out
+}
+
 func EncodePutImage(chatID, key string) []byte {
-	content := pb.EncodeString(2, key)
-	content = append(content, pb.EncodeInt(31, 1)...)
-	out := pb.EncodeInt(1, MsgTypeImage)
+	secret := make([]byte, 32)
+	nonce := make([]byte, 12)
+	content := EncodeImageContent(key, defaultFSUnit, 1, 1, 1, secret, nonce, nil)
+	return encodePut(MsgTypeImage, chatID, content)
+}
+
+func encodePut(typ uint64, chatID string, content []byte) []byte {
+	out := pb.EncodeInt(1, typ)
 	out = append(out, pb.EncodeBytes(2, content)...)
 	out = append(out, pb.EncodeString(3, chatID)...)
 	out = append(out, pb.EncodeString(6, pb.NewUUID())...)
@@ -69,13 +120,7 @@ func EncodePutFile(chatID, key, name, mimeType string, size int) []byte {
 	content = append(content, pb.EncodeString(11, name)...)
 	content = append(content, pb.EncodeString(12, mimeType)...)
 	content = append(content, pb.EncodeInt(13, uint64(size))...)
-	out := pb.EncodeInt(1, MsgTypeFile)
-	out = append(out, pb.EncodeBytes(2, content)...)
-	out = append(out, pb.EncodeString(3, chatID)...)
-	out = append(out, pb.EncodeString(6, pb.NewUUID())...)
-	out = append(out, pb.EncodeInt(7, 1)...)
-	out = append(out, pb.EncodeInt(8, 1)...)
-	return out
+	return encodePut(MsgTypeFile, chatID, content)
 }
 
 type uploadResp struct {
@@ -93,13 +138,12 @@ func UploadImage(auth session.Auth, path string) (key, mimeType, name string, si
 	if err != nil {
 		return "", "", "", 0, err
 	}
+	return uploadBytes(auth, data, filepath.Base(path), mimeForPath(path))
+}
+
+func uploadBytes(auth session.Auth, data []byte, name, mimeType string) (key, mime string, filename string, size int, err error) {
 	if len(data) == 0 {
 		return "", "", "", 0, fmt.Errorf("empty image file")
-	}
-	name = filepath.Base(path)
-	mimeType = mimeForPath(path)
-	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil && !strings.HasSuffix(strings.ToLower(path), ".webp") {
-		return "", "", "", 0, fmt.Errorf("not a readable image: %w", err)
 	}
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
@@ -157,6 +201,41 @@ func UploadImage(auth session.Auth, path string) (key, mimeType, name string, si
 	return out.File.FileKey, mimeType, name, len(data), nil
 }
 
+func aesGCM(plain []byte) (secret, nonce, ct []byte, err error) {
+	secret = make([]byte, 32)
+	nonce = make([]byte, 12)
+	if _, err = rand.Read(secret); err != nil {
+		return nil, nil, nil, err
+	}
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, nil, nil, err
+	}
+	block, err := aes.NewCipher(secret)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(nonce) != gcm.NonceSize() {
+		nonce = make([]byte, gcm.NonceSize())
+		_, _ = rand.Read(nonce)
+	}
+	ct = gcm.Seal(nil, nonce, plain, nil)
+	return secret, nonce, ct, nil
+}
+
+func putImageOK(status int, raw []byte, key string) bool {
+	if status != 200 || len(raw) < 80 {
+		return false
+	}
+	if bytes.Contains(raw, []byte("ValidateKey")) {
+		return false
+	}
+	return bytes.Contains(raw, []byte(key)) || len(raw) > 200
+}
+
 func Image(auth session.Auth, who, path string, dryRun bool) (map[string]any, error) {
 	if !auth.HasSessionCookie() {
 		return nil, fmt.Errorf("no decrypted session cookie")
@@ -169,7 +248,15 @@ func Image(auth session.Auth, who, path string, dryRun bool) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	if _, err := os.Stat(path); err != nil {
+	plain, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(plain) == 0 {
+		return nil, fmt.Errorf("empty image file")
+	}
+	cfg, img, err := decodeImage(plain)
+	if err != nil {
 		return nil, err
 	}
 	out := map[string]any{
@@ -181,18 +268,32 @@ func Image(auth session.Auth, who, path string, dryRun bool) (map[string]any, er
 	if dryRun {
 		return out, nil
 	}
-	key, mimeType, name, size, err := UploadImage(auth, path)
+	secret, nonce, _, err := aesGCM(plain)
+	if err != nil {
+		return nil, err
+	}
+	key, mimeType, name, size, err := uploadBytes(auth, plain, filepath.Base(path), mimeForPath(path))
 	if err != nil {
 		return nil, err
 	}
 	out["key"] = key
 	out["mime"] = mimeType
-	status, raw, err := gateway.Do(auth, CmdPutMessage, EncodePutImage(chatID, key))
+	preview := jpegPreview(img)
+	content := EncodeImageContent(key, defaultFSUnit, cfg.Width, cfg.Height, size, secret, nonce, preview)
+	put := encodePut(MsgTypeImage, chatID, content)
+
 	kind := "image"
+	status, raw, err := gateway.Do(auth, CmdPutMessage, put)
 	if err != nil {
 		return nil, err
 	}
-	if status >= 400 {
+	if !putImageOK(status, raw, key) {
+		if raw2, err2 := frontier.Call(auth, CmdPutMessage, put, []byte(key)); err2 == nil && len(raw2) > 0 {
+			raw = raw2
+			status = 200
+		}
+	}
+	if !putImageOK(status, raw, key) {
 		status, raw, err = gateway.Do(auth, CmdPutMessage, EncodePutFile(chatID, key, name, mimeType, size))
 		if err != nil {
 			return nil, err
@@ -209,4 +310,16 @@ func Image(auth session.Auth, who, path string, dryRun bool) (map[string]any, er
 	out["sent"] = true
 	out["kind"] = kind
 	return out, nil
+}
+
+func decodeImage(plain []byte) (image.Config, image.Image, error) {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(plain))
+	if err != nil {
+		return image.Config{}, nil, fmt.Errorf("not a readable image: %w", err)
+	}
+	img, _, err := image.Decode(bytes.NewReader(plain))
+	if err != nil {
+		return cfg, image.NewRGBA(image.Rect(0, 0, cfg.Width, cfg.Height)), nil
+	}
+	return cfg, img, nil
 }

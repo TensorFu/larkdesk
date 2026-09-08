@@ -171,6 +171,62 @@ func DecodeFrame(raw []byte) Frame {
 	return out
 }
 
+func encodeHeader(k, v string) []byte {
+	return pb.EncodeBytes(5, append(pb.EncodeString(1, k), pb.EncodeString(2, v)...))
+}
+
+func EncodeFrame(seq, ts uint64, packet []byte, userID string, cmd uint64) []byte {
+	var b []byte
+	b = append(b, pb.EncodeInt(1, seq)...)
+	b = append(b, pb.EncodeInt(2, ts)...)
+	b = append(b, pb.EncodeInt(3, 1)...)
+	b = append(b, pb.EncodeInt(4, 1)...)
+	cmdStr := fmt.Sprintf("%d", cmd)
+	for _, kv := range [][2]string{
+		{"content-type", "application/x-protobuf"},
+		{"x-command", cmdStr},
+		{"x-command-version", "2.7.0"},
+		{"x-Source", "web"},
+		{"X-Auth-User", userID},
+		{"To-Cluster", "im"},
+	} {
+		b = append(b, encodeHeader(kv[0], kv[1])...)
+	}
+	b = append(b, pb.EncodeBytes(6, nil)...)
+	b = append(b, pb.EncodeBytes(7, nil)...)
+	b = append(b, pb.EncodeBytes(8, packet)...)
+	return b
+}
+
+func Call(auth session.Auth, cmd uint64, payload []byte, echo []byte) ([]byte, error) {
+	conn, err := Dial(auth)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	packet, _ := pb.EncodePacket(cmd, payload, "")
+	frame := EncodeFrame(1, uint64(time.Now().UnixNano()), packet, auth.Identity.UserID, cmd)
+	if err := conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+		return nil, err
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(8 * time.Second))
+	for i := 0; i < 16; i++ {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			return nil, err
+		}
+		raw = MaybeGunzip(raw)
+		if echo != nil && bytes.Contains(raw, echo) {
+			return raw, nil
+		}
+		fr := DecodeFrame(raw)
+		if fr.Cmd == cmd && len(fr.Payload) > 0 {
+			return raw, nil
+		}
+	}
+	return nil, fmt.Errorf("frontier call timeout cmd=%d", cmd)
+}
+
 func Dial(auth session.Auth) (*websocket.Conn, error) {
 	deviceID, ticket, err := FetchTicket(auth)
 	if err != nil {

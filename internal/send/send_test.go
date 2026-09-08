@@ -51,12 +51,16 @@ func TestEncodePutImage(t *testing.T) {
 	if string(fields[3].Bytes) != "123" {
 		t.Fatal(string(fields[3].Bytes))
 	}
+	if !bytes.Contains(raw, []byte("img_v3_abc")) {
+		t.Fatal("missing key")
+	}
+	content := fields[2].Bytes
 	inner := map[int]pb.Field{}
-	for _, f := range pb.DecodeFields(fields[2].Bytes) {
+	for _, f := range pb.DecodeFields(content) {
 		inner[f.Num] = f
 	}
-	if string(inner[2].Bytes) != "img_v3_abc" {
-		t.Fatal(string(inner[2].Bytes))
+	if inner[2].Wire != "bytes" {
+		t.Fatalf("want imageV2, got %+v", inner)
 	}
 }
 
