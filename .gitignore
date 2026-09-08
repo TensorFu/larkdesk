@@ -1,6 +1,10 @@
+__pycache__/
 .DS_Store
-captures/
+.venv/
+*.egg-info/
+*.pyc
 /larkdesk
 /larkdesk.exe
-dist/
 build/
+captures/
+dist/
